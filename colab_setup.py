@@ -24,10 +24,11 @@ def install_dependencies():
     subprocess.run(["pip", "install", "huggingface_hub==0.16.4"], check=True)
     subprocess.run(["pip", "install", "diffusers==0.19.3"], check=True)
     subprocess.run(["pip", "install", "google-generativeai"], check=True)
-    subprocess.run(["pip", "install", "torch torchvision"], check=True)
+    subprocess.run(["pip", "install", "torch"], check=True)
+    subprocess.run(["pip", "install", "torchvision"], check=True)
     subprocess.run(["pip", "install", "transformers"], check=True)
-    subprocess.run(["pip", "install", "imageio imageio-ffmpeg"], check=True)
-    subprocess.run(["pip", "install", "scipy numpy"], check=True)
+    subprocess.run(["pip", "install", "imageio", "imageio-ffmpeg"], check=True)
+    subprocess.run(["pip", "install", "scipy", "numpy"], check=True)
 
 # Set environment variables
 def setup_environment(api_key):
