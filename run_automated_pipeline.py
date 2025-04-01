@@ -107,13 +107,39 @@ def setup_environment():
     if not Path("./Open-Sora-Plan-v1.0.0-hf").exists():
         print("\n\033[1m📥 Cloning Open Sora repository...\033[0m")
         try:
+            # Try the direct repository first
             subprocess.run(
-                ["git", "clone", "-b", "dev", "https://github.com/camenduru/Open-Sora-Plan-v1.0.0-hf"],
+                ["git", "clone", "https://github.com/camenduru/Open-Sora-Plan-v1.0.0-hf"],
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
-            
+        except subprocess.SubprocessError:
+            # If that fails, try alternative repository sources
+            try:
+                print("\n\033[93m⚠️ Main repository failed, trying alternative source...\033[0m")
+                subprocess.run(
+                    ["git", "clone", "https://huggingface.co/LanguageBind/Open-Sora-Plan-v1.0.0", "Open-Sora-Plan-v1.0.0-hf"],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+            except subprocess.SubprocessError as e:
+                try:
+                    # Create the directory manually if all cloning attempts fail
+                    print("\n\033[93m⚠️ Repository cloning failed, creating directory structure manually...\033[0m")
+                    os.makedirs("./Open-Sora-Plan-v1.0.0-hf", exist_ok=True)
+                    os.makedirs("./Open-Sora-Plan-v1.0.0-hf/opensora", exist_ok=True)
+                    
+                    # Create minimal required files
+                    Path("./Open-Sora-Plan-v1.0.0-hf/opensora/__init__.py").touch()
+                    
+                    print("\n\033[93m⚠️ Manual directory creation complete. The pipeline will use Gemini-generated images only.\033[0m")
+                except Exception as e2:
+                    print(f"\n\033[91m❌ Failed to set up Open Sora structure: {e2}\033[0m")
+                    sys.exit(1)
+                    
+        try:
             # Install Open Sora dependencies
             print("\n\033[1m📦 Installing Open Sora dependencies...\033[0m")
             subprocess.run(
@@ -125,8 +151,8 @@ def setup_environment():
                 stderr=subprocess.PIPE
             )
         except subprocess.SubprocessError as e:
-            print(f"\n\033[91m❌ Failed to clone Open Sora or install dependencies: {e}\033[0m")
-            sys.exit(1)
+            print(f"\n\033[93m⚠️ Failed to install some dependencies: {e}\033[0m")
+            print("\n\033[93m⚠️ The pipeline will continue but may not have full functionality.\033[0m")
     
     print("\n\033[1m✅ Environment setup complete!\033[0m")
     return output_dir

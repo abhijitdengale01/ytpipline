@@ -13,6 +13,7 @@ import mimetypes
 import random
 from datetime import datetime
 from pathlib import Path
+import sys
 
 # Gemini imports
 from google import genai
@@ -53,19 +54,53 @@ def setup_environment():
     # Check if Open Sora repo exists, if not clone it
     if not Path("./Open-Sora-Plan-v1.0.0-hf").exists():
         print("\n🔄 Cloning Open Sora repository...")
-        subprocess.run(
-            ["git", "clone", "-b", "dev", "https://github.com/camenduru/Open-Sora-Plan-v1.0.0-hf"],
-            check=True
-        )
-        
-        # Install dependencies for Open Sora
-        print("\n🔄 Installing Open Sora dependencies...")
-        subprocess.run(
-            ["pip", "install", "-q", "diffusers==0.24.0", "gradio==3.50.2", "einops==0.7.0", 
-             "omegaconf==2.1.1", "pytorch-lightning==1.4.2", "torchmetrics==0.6.0", 
-             "torchtext==0.6", "accelerate==0.28.0"],
-            check=True
-        )
+        try:
+            # Try the direct repository first
+            subprocess.run(
+                ["git", "clone", "https://github.com/camenduru/Open-Sora-Plan-v1.0.0-hf"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+        except subprocess.SubprocessError:
+            # If that fails, try alternative repository sources
+            try:
+                print("\n⚠️ Main repository failed, trying alternative source...")
+                subprocess.run(
+                    ["git", "clone", "https://huggingface.co/LanguageBind/Open-Sora-Plan-v1.0.0", "Open-Sora-Plan-v1.0.0-hf"],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+            except subprocess.SubprocessError as e:
+                try:
+                    # Create the directory manually if all cloning attempts fail
+                    print("\n⚠️ Repository cloning failed, creating directory structure manually...")
+                    os.makedirs("./Open-Sora-Plan-v1.0.0-hf", exist_ok=True)
+                    os.makedirs("./Open-Sora-Plan-v1.0.0-hf/opensora", exist_ok=True)
+                    
+                    # Create minimal required files
+                    Path("./Open-Sora-Plan-v1.0.0-hf/opensora/__init__.py").touch()
+                    
+                    print("\n⚠️ Manual directory creation complete. The pipeline will use Gemini-generated images only.")
+                except Exception as e2:
+                    print(f"\n❌ Failed to set up Open Sora structure: {e2}")
+                    sys.exit(1)
+                    
+        try:
+            # Install Open Sora dependencies
+            print("\n🔄 Installing Open Sora dependencies...")
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-q", "diffusers==0.24.0", "gradio==3.50.2", 
+                 "einops==0.7.0", "omegaconf==2.1.1", "pytorch-lightning==1.4.2", 
+                 "torchmetrics==0.6.0", "torchtext==0.6", "accelerate==0.28.0"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+        except subprocess.SubprocessError as e:
+            print(f"\n⚠️ Failed to install some dependencies: {e}")
+            print("\n⚠️ The pipeline will continue but may not have full functionality.")
     
     # Install Bark if not already installed
     try:
