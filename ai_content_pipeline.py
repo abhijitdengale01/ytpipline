@@ -351,6 +351,7 @@ def generate_audio_with_bark(text, voice_preset="v2/en_speaker_1"):
     
     # Preload Bark models
     print("📥 Loading Bark models...")
+    from bark import SAMPLE_RATE, generate_audio, preload_models
     preload_models()
     
     # Check if text is too long and split if necessary
@@ -378,23 +379,44 @@ def generate_audio_with_bark(text, voice_preset="v2/en_speaker_1"):
     else:
         text_segments = [text]
     
-    print(f"Generating audio for {len(text_segments)} text segments...")
+    print(f"Split text into {len(text_segments)} segments for processing")
     
-    # Generate audio for each segment
-    audio_arrays = []
-    for i, segment in enumerate(text_segments):
-        print(f"\nGenerating segment {i+1}/{len(text_segments)}...")
-        print(f"Text: {segment[:50]}..." if len(segment) > 50 else f"Text: {segment}")
-        audio_array = generate_audio(segment, history_prompt=voice_preset)
-        audio_arrays.append(audio_array)
-    
-    # Combine all audio segments
-    combined_audio = np.concatenate(audio_arrays)
-    
-    # Save the audio file
+    # Generate timestamp for output filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     audio_path = f"./output/generated_audio_{timestamp}.wav"
-    wavfile.write(audio_path, SAMPLE_RATE, combined_audio)
+    
+    # Create directories if they don't exist
+    os.makedirs("./output/temp", exist_ok=True)
+    
+    if len(text_segments) > 1:
+        # Process each segment separately
+        segment_audios = []
+        for i, segment in enumerate(text_segments):
+            print(f"Processing segment {i+1}/{len(text_segments)}...")
+            audio_array = generate_audio(segment, history_prompt=voice_preset)
+            segment_path = f"./output/temp/segment_{i}_{timestamp}.wav"
+            from scipy.io.wavfile import write as write_wav
+            write_wav(segment_path, SAMPLE_RATE, audio_array)
+            segment_audios.append(segment_path)
+        
+        # Combine audio segments using ffmpeg
+        import subprocess
+        # Create a file list for ffmpeg
+        with open(f"./output/temp/filelist_{timestamp}.txt", "w") as f:
+            for audio_file in segment_audios:
+                f.write(f"file '{os.path.abspath(audio_file)}'\n")
+        
+        # Concatenate audio files
+        subprocess.run([
+            "ffmpeg", "-f", "concat", "-safe", "0", 
+            "-i", f"./output/temp/filelist_{timestamp}.txt", 
+            "-c", "copy", audio_path
+        ], check=True)
+    else:
+        # Process single segment
+        audio_array = generate_audio(text_segments[0], history_prompt=voice_preset)
+        from scipy.io.wavfile import write as write_wav
+        write_wav(audio_path, SAMPLE_RATE, audio_array)
     
     print(f"\n✅ Audio generation complete!")
     print(f"🔉 Audio saved to {audio_path}")
