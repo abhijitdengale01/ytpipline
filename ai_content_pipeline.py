@@ -23,9 +23,6 @@ from google.genai import types
 from bark import SAMPLE_RATE, generate_audio, preload_models
 import scipy.io.wavfile as wavfile
 
-# Open Sora imports will be dynamically loaded to avoid import errors
-# if the repo is not yet cloned
-
 def save_binary_file(file_name, data):
     f = open(file_name, "wb")
     f.write(data)
@@ -238,16 +235,19 @@ def generate_video_with_open_sora(prompt=None, image_paths=None, video_steps=50,
         torch.manual_seed(seed)
         torch.cuda.manual_seed(seed)
         
-        # Load model components
-        from diffusers import PNDMScheduler
-        from transformers import T5Tokenizer, T5EncoderModel
-        
-        # Import Open Sora components (making sure they're in the path)
+        # Import Open Sora components here, after the repo has been cloned
         sys.path.append("./Open-Sora-Plan-v1.0.0-hf")
+        
+        # Now import the OpenSora modules
+        print("Importing OpenSora modules...")
         from opensora.models.ae import ae_stride_config, getae, getae_wrapper
         from opensora.models.diffusion.latte.modeling_latte import LatteT2V
         from opensora.sample.pipeline_videogen import VideoGenPipeline
 
+        # Load model components
+        from diffusers import PNDMScheduler
+        from transformers import T5Tokenizer, T5EncoderModel
+        
         print("Loading transformer model...")
         transformer_model = LatteT2V.from_pretrained(args.model_path, subfolder=args.version, 
                                                    torch_dtype=torch.float16, cache_dir='cache_dir').to(device)

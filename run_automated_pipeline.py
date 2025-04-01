@@ -12,9 +12,8 @@ import torch
 import imageio
 from diffusers import PNDMScheduler
 from transformers import T5Tokenizer, T5EncoderModel
-from opensora.models.ae import ae_stride_config, getae, getae_wrapper
-from opensora.models.diffusion.latte.modeling_latte import LatteT2V
-from opensora.sample.pipeline_videogen import VideoGenPipeline
+
+# Note: Do not import opensora modules here as they won't be available until after setup_environment runs
 
 def setup_environment():
     """Set up the environment for the pipeline"""
@@ -206,16 +205,15 @@ def generate_video_with_open_sora(prompt=None, image_paths=None, video_steps=50,
         torch.manual_seed(seed)
         torch.cuda.manual_seed(seed)
         
-        # Load model components
-        from diffusers import PNDMScheduler
-        from transformers import T5Tokenizer, T5EncoderModel
-        
-        # Import Open Sora components (making sure they're in the path)
+        # Import Open Sora components here, after the repo has been cloned
         sys.path.append("./Open-Sora-Plan-v1.0.0-hf")
+        
+        # Now import the OpenSora modules
+        print("\n\033[1mImporting OpenSora modules...\033[0m")
         from opensora.models.ae import ae_stride_config, getae, getae_wrapper
         from opensora.models.diffusion.latte.modeling_latte import LatteT2V
         from opensora.sample.pipeline_videogen import VideoGenPipeline
-
+        
         print("\n\033[1mLoading transformer model...\033[0m")
         transformer_model = LatteT2V.from_pretrained(args.model_path, subfolder=args.version, 
                                                    torch_dtype=torch.float16, cache_dir='cache_dir').to(device)
