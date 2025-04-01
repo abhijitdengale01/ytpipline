@@ -6,6 +6,15 @@ import os
 import sys
 import subprocess
 from pathlib import Path
+import datetime
+import random
+import torch
+import imageio
+from diffusers import PNDMScheduler
+from transformers import T5Tokenizer, T5EncoderModel
+from opensora.models.ae import ae_stride_config, getae, getae_wrapper
+from opensora.models.diffusion.latte.modeling_latte import LatteT2V
+from opensora.sample.pipeline_videogen import VideoGenPipeline
 
 def setup_environment():
     """Set up the environment for the pipeline"""
@@ -107,37 +116,47 @@ def setup_environment():
     if not Path("./Open-Sora-Plan-v1.0.0-hf").exists():
         print("\n\033[1m📥 Cloning Open Sora repository...\033[0m")
         try:
-            # Try the direct repository first
+            # Use the dev branch as specified
             subprocess.run(
-                ["git", "clone", "https://github.com/camenduru/Open-Sora-Plan-v1.0.0-hf"],
+                ["git", "clone", "-b", "dev", "https://github.com/camenduru/Open-Sora-Plan-v1.0.0-hf"],
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
         except subprocess.SubprocessError:
-            # If that fails, try alternative repository sources
+            # If that fails, try without the branch specification
             try:
-                print("\n\033[93m⚠️ Main repository failed, trying alternative source...\033[0m")
+                print("\n\033[93m⚠️ Dev branch failed, trying main branch...\033[0m")
                 subprocess.run(
-                    ["git", "clone", "https://huggingface.co/LanguageBind/Open-Sora-Plan-v1.0.0", "Open-Sora-Plan-v1.0.0-hf"],
+                    ["git", "clone", "https://github.com/camenduru/Open-Sora-Plan-v1.0.0-hf"],
                     check=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE
                 )
-            except subprocess.SubprocessError as e:
+            except subprocess.SubprocessError:
+                # If that fails, try alternative repository sources
                 try:
-                    # Create the directory manually if all cloning attempts fail
-                    print("\n\033[93m⚠️ Repository cloning failed, creating directory structure manually...\033[0m")
-                    os.makedirs("./Open-Sora-Plan-v1.0.0-hf", exist_ok=True)
-                    os.makedirs("./Open-Sora-Plan-v1.0.0-hf/opensora", exist_ok=True)
-                    
-                    # Create minimal required files
-                    Path("./Open-Sora-Plan-v1.0.0-hf/opensora/__init__.py").touch()
-                    
-                    print("\n\033[93m⚠️ Manual directory creation complete. The pipeline will use Gemini-generated images only.\033[0m")
-                except Exception as e2:
-                    print(f"\n\033[91m❌ Failed to set up Open Sora structure: {e2}\033[0m")
-                    sys.exit(1)
+                    print("\n\033[93m⚠️ Main repository failed, trying alternative source...\033[0m")
+                    subprocess.run(
+                        ["git", "clone", "https://huggingface.co/LanguageBind/Open-Sora-Plan-v1.0.0", "Open-Sora-Plan-v1.0.0-hf"],
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE
+                    )
+                except subprocess.SubprocessError as e:
+                    try:
+                        # Create the directory manually if all cloning attempts fail
+                        print("\n\033[93m⚠️ Repository cloning failed, creating directory structure manually...\033[0m")
+                        os.makedirs("./Open-Sora-Plan-v1.0.0-hf", exist_ok=True)
+                        os.makedirs("./Open-Sora-Plan-v1.0.0-hf/opensora", exist_ok=True)
+                        
+                        # Create minimal required files
+                        Path("./Open-Sora-Plan-v1.0.0-hf/opensora/__init__.py").touch()
+                        
+                        print("\n\033[93m⚠️ Manual directory creation complete. The pipeline will use Gemini-generated images only.\033[0m")
+                    except Exception as e2:
+                        print(f"\n\033[91m❌ Failed to set up Open Sora structure: {e2}\033[0m")
+                        sys.exit(1)
                     
         try:
             # Install Open Sora dependencies
@@ -156,6 +175,135 @@ def setup_environment():
     
     print("\n\033[1m✅ Environment setup complete!\033[0m")
     return output_dir
+
+def generate_video_with_open_sora(prompt=None, image_paths=None, video_steps=50, video_scale=10.0, video_seed=0):
+    """Generate a video using Open Sora from a text prompt or images"""
+    print("\n\033[1m📹 Generating video with Open Sora...\033[0m")
+    
+    if prompt is None and (image_paths is None or len(image_paths) == 0):
+        raise ValueError("Either prompt or image_paths must be provided")
+    
+    # Generate a timestamp for the output filename
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_path = f"./output/generated_video_{timestamp}.mp4"
+    
+    try:
+        # Setup the Open Sora model
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # Args configuration
+        args = type('args', (), {
+            'ae': 'CausalVAEModel_4x8x8',
+            'force_images': image_paths is not None and len(image_paths) > 0,
+            'model_path': 'LanguageBind/Open-Sora-Plan-v1.0.0',
+            'text_encoder_name': 'DeepFloyd/t5-v1_1-xxl',
+            'version': '65x512x512'
+        })
+        
+        # Set environment seed
+        seed = video_seed if video_seed > 0 else random.randint(0, 203279)
+        random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+        
+        # Load model components
+        from diffusers import PNDMScheduler
+        from transformers import T5Tokenizer, T5EncoderModel
+        
+        # Import Open Sora components (making sure they're in the path)
+        sys.path.append("./Open-Sora-Plan-v1.0.0-hf")
+        from opensora.models.ae import ae_stride_config, getae, getae_wrapper
+        from opensora.models.diffusion.latte.modeling_latte import LatteT2V
+        from opensora.sample.pipeline_videogen import VideoGenPipeline
+
+        print("\n\033[1mLoading transformer model...\033[0m")
+        transformer_model = LatteT2V.from_pretrained(args.model_path, subfolder=args.version, 
+                                                   torch_dtype=torch.float16, cache_dir='cache_dir').to(device)
+
+        print("\n\033[1mLoading VAE model...\033[0m")
+        vae = getae_wrapper(args.ae)(args.model_path, subfolder="vae", cache_dir='cache_dir').to(device, dtype=torch.float16)
+        vae.vae.enable_tiling()
+        image_size = int(args.version.split('x')[1])
+        latent_size = (image_size // ae_stride_config[args.ae][1], image_size // ae_stride_config[args.ae][2])
+        vae.latent_size = latent_size
+        transformer_model.force_images = args.force_images
+        
+        print("\n\033[1mLoading text encoder and tokenizer...\033[0m")
+        tokenizer = T5Tokenizer.from_pretrained(args.text_encoder_name, cache_dir="cache_dir")
+        text_encoder = T5EncoderModel.from_pretrained(args.text_encoder_name, cache_dir="cache_dir",
+                                                    torch_dtype=torch.float16).to(device)
+
+        # Set all models to eval mode
+        transformer_model.eval()
+        vae.eval()
+        text_encoder.eval()
+        
+        # Setup scheduler and pipeline
+        scheduler = PNDMScheduler()
+        videogen_pipeline = VideoGenPipeline(vae=vae,
+                                           text_encoder=text_encoder,
+                                           tokenizer=tokenizer,
+                                           scheduler=scheduler,
+                                           transformer=transformer_model).to(device=device)
+
+        # Generate the video
+        with torch.no_grad():
+            print(f"\n\033[1mGenerating video with prompt: {prompt}\033[0m")
+            video_length = transformer_model.config.video_length if not args.force_images else 1
+            height, width = int(args.version.split('x')[1]), int(args.version.split('x')[2])
+            num_frames = 1 if video_length == 1 else int(args.version.split('x')[0])
+            
+            videos = videogen_pipeline(prompt,
+                                     video_length=video_length,
+                                     height=height,
+                                     width=width,
+                                     num_inference_steps=int(video_steps),
+                                     guidance_scale=float(video_scale),
+                                     enable_temporal_attentions=not args.force_images,
+                                     num_images_per_prompt=1,
+                                     mask_feature=True).video
+
+        # Clear CUDA cache
+        torch.cuda.empty_cache()
+        
+        # Save the video
+        videos = videos[0]
+        imageio.mimwrite(output_path, videos, fps=24, quality=9)  # highest quality is 10, lowest is 0
+        print(f"\n\033[1m📹 Video saved to {output_path}\033[0m")
+        
+        # Display model info
+        display_model_info = f"Video size: {num_frames}×{height}×{width}, Sampling Step: {video_steps}, Guidance Scale: {video_scale}"
+        print(f"\n\033[1m{display_model_info}\033[0m")
+        
+        return output_path
+    
+    except Exception as e:
+        print(f"\n\033[91m🚫 Error generating video with Open Sora: {str(e)}\033[0m")
+        print("\n\033[93m📝 Falling back to using Gemini-generated images only...\033[0m")
+        
+        # If we have images but Open Sora failed, create a simple slideshow from the images
+        if image_paths and len(image_paths) > 0:
+            try:
+                print("\n\033[1m📸 Creating slideshow from Gemini-generated images...\033[0m")
+                # Create slideshow from images (5 seconds per image)
+                images = []
+                for img_path in image_paths:
+                    if os.path.exists(img_path):
+                        img = imageio.imread(img_path)
+                        # Duplicate each image to create a 5-second clip (assuming 30fps)
+                        for _ in range(150):  # 5 seconds at 30fps
+                            images.append(img)
+                
+                # Save as video
+                if images:
+                    imageio.mimwrite(output_path, images, fps=30, quality=9)
+                    print(f"\n\033[1m📹 Slideshow video saved to {output_path}\033[0m")
+                    return output_path
+            except Exception as e2:
+                print(f"\n\033[91m🚫 Error creating slideshow: {str(e2)}\033[0m")
+        
+        # If all else fails, raise the original exception
+        raise e
 
 def run_pipeline():
     """Run the AI Content Pipeline automatically"""

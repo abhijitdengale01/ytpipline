@@ -55,37 +55,47 @@ def setup_environment():
     if not Path("./Open-Sora-Plan-v1.0.0-hf").exists():
         print("\n🔄 Cloning Open Sora repository...")
         try:
-            # Try the direct repository first
+            # Use the dev branch as specified
             subprocess.run(
-                ["git", "clone", "https://github.com/camenduru/Open-Sora-Plan-v1.0.0-hf"],
+                ["git", "clone", "-b", "dev", "https://github.com/camenduru/Open-Sora-Plan-v1.0.0-hf"],
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
         except subprocess.SubprocessError:
-            # If that fails, try alternative repository sources
+            # If that fails, try without the branch specification
             try:
-                print("\n⚠️ Main repository failed, trying alternative source...")
+                print("\n⚠️ Dev branch failed, trying main branch...")
                 subprocess.run(
-                    ["git", "clone", "https://huggingface.co/LanguageBind/Open-Sora-Plan-v1.0.0", "Open-Sora-Plan-v1.0.0-hf"],
+                    ["git", "clone", "https://github.com/camenduru/Open-Sora-Plan-v1.0.0-hf"],
                     check=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE
                 )
-            except subprocess.SubprocessError as e:
+            except subprocess.SubprocessError:
+                # If that fails, try alternative repository sources
                 try:
-                    # Create the directory manually if all cloning attempts fail
-                    print("\n⚠️ Repository cloning failed, creating directory structure manually...")
-                    os.makedirs("./Open-Sora-Plan-v1.0.0-hf", exist_ok=True)
-                    os.makedirs("./Open-Sora-Plan-v1.0.0-hf/opensora", exist_ok=True)
-                    
-                    # Create minimal required files
-                    Path("./Open-Sora-Plan-v1.0.0-hf/opensora/__init__.py").touch()
-                    
-                    print("\n⚠️ Manual directory creation complete. The pipeline will use Gemini-generated images only.")
-                except Exception as e2:
-                    print(f"\n❌ Failed to set up Open Sora structure: {e2}")
-                    sys.exit(1)
+                    print("\n⚠️ Main repository failed, trying alternative source...")
+                    subprocess.run(
+                        ["git", "clone", "https://huggingface.co/LanguageBind/Open-Sora-Plan-v1.0.0", "Open-Sora-Plan-v1.0.0-hf"],
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE
+                    )
+                except subprocess.SubprocessError as e:
+                    try:
+                        # Create the directory manually if all cloning attempts fail
+                        print("\n⚠️ Repository cloning failed, creating directory structure manually...")
+                        os.makedirs("./Open-Sora-Plan-v1.0.0-hf", exist_ok=True)
+                        os.makedirs("./Open-Sora-Plan-v1.0.0-hf/opensora", exist_ok=True)
+                        
+                        # Create minimal required files
+                        Path("./Open-Sora-Plan-v1.0.0-hf/opensora/__init__.py").touch()
+                        
+                        print("\n⚠️ Manual directory creation complete. The pipeline will use Gemini-generated images only.")
+                    except Exception as e2:
+                        print(f"\n❌ Failed to set up Open Sora structure: {e2}")
+                        sys.exit(1)
                     
         try:
             # Install Open Sora dependencies
@@ -198,174 +208,134 @@ def generate_content_with_gemini(prompt):
     
     return full_response, content_file, image_files
 
-def generate_video_with_open_sora(prompt=None, image_paths=None, sample_steps=50, scale=10.0, seed=0, randomize_seed=True):
-    """Generate video using Open Sora
+def generate_video_with_open_sora(prompt=None, image_paths=None, video_steps=50, video_scale=10.0, video_seed=0):
+    """Generate a video using Open Sora from a text prompt or images"""
+    print("\n🎬 Generating video with Open Sora...")
     
-    Args:
-        prompt (str, optional): The prompt to generate video from
-        image_paths (list, optional): List of paths to images to use as input
-        sample_steps (int): Number of sampling steps
-        scale (float): Guidance scale
-        seed (int): Random seed
-        randomize_seed (bool): Whether to randomize the seed
-        
-    Returns:
-        str: Path to the generated video
-    """
-    # Either prompt or image_paths must be provided
     if prompt is None and (image_paths is None or len(image_paths) == 0):
         raise ValueError("Either prompt or image_paths must be provided")
-        
-    print("\n🎨 Generating video with Open Sora...")
     
-    # Change to Open Sora directory
-    prev_dir = os.getcwd()
-    os.chdir("./Open-Sora-Plan-v1.0.0-hf")
-    
-    # Dynamically import Open Sora components
-    import sys
-    sys.path.append("./")
-    
-    import torch
-    from diffusers import PNDMScheduler
-    from transformers import T5Tokenizer, T5EncoderModel
-    from PIL import Image
-    
-    from opensora.models.ae import ae_stride_config, getae, getae_wrapper
-    from opensora.models.diffusion.latte.modeling_latte import LatteT2V
-    from opensora.sample.pipeline_videogen import VideoGenPipeline
-    
-    # Setup args
-    class Args:
-        def __init__(self):
-            self.ae = 'CausalVAEModel_4x8x8'
-            self.force_images = False
-            self.model_path = 'LanguageBind/Open-Sora-Plan-v1.0.0'
-            self.text_encoder_name = 'DeepFloyd/t5-v1_1-xxl'
-            self.version = '65x512x512'
-    
-    args = Args()
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    print(f"\n📥 Loading Open Sora models (using {device})...")
-    
-    # Set random seed if randomizing
-    if randomize_seed:
-        seed = random.randint(0, 203279)
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    
-    # Load model
-    transformer_model = LatteT2V.from_pretrained(
-        args.model_path, 
-        subfolder=args.version, 
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-        cache_dir='cache_dir'
-    ).to(device)
-
-    vae = getae_wrapper(args.ae)(
-        args.model_path, 
-        subfolder="vae", 
-        cache_dir='cache_dir'
-    ).to(device, dtype=torch.float16 if torch.cuda.is_available() else torch.float32)
-    
-    vae.vae.enable_tiling()
-    image_size = int(args.version.split('x')[1])
-    latent_size = (image_size // ae_stride_config[args.ae][1], image_size // ae_stride_config[args.ae][2])
-    vae.latent_size = latent_size
-    transformer_model.force_images = args.force_images
-    
-    tokenizer = T5Tokenizer.from_pretrained(args.text_encoder_name, cache_dir="cache_dir")
-    text_encoder = T5EncoderModel.from_pretrained(
-        args.text_encoder_name, 
-        cache_dir="cache_dir",
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
-    ).to(device)
-
-    # Set eval mode
-    transformer_model.eval()
-    vae.eval()
-    text_encoder.eval()
-    scheduler = PNDMScheduler()
-    videogen_pipeline = VideoGenPipeline(
-        vae=vae,
-        text_encoder=text_encoder,
-        tokenizer=tokenizer,
-        scheduler=scheduler,
-        transformer=transformer_model
-    ).to(device=device)
-    
-    print("\n🎬 Generating video...")
-    # Generate the video
-    video_length = transformer_model.config.video_length
-    height, width = int(args.version.split('x')[1]), int(args.version.split('x')[2])
-    num_frames = int(args.version.split('x')[0])
-    
-    # If image_paths is provided, we'll use a different approach to create a video from images
-    if image_paths and len(image_paths) > 0:
-        # Create a video from the images
-        print(f"Creating video from {len(image_paths)} images...")
-        
-        # Load and resize images to match required dimensions
-        frames = []
-        for img_path in image_paths:
-            try:
-                img = Image.open(img_path)
-                img = img.resize((width, height))
-                frames.append(np.array(img))
-            except Exception as e:
-                print(f"Error loading image {img_path}: {e}")
-        
-        # If no valid images, fall back to generating from prompt
-        if len(frames) == 0 and prompt:
-            print("No valid images found, falling back to prompt-based generation")
-            # Use the normal generation method as below
-            with torch.no_grad():
-                videos = videogen_pipeline(
-                    prompt,
-                    video_length=video_length,
-                    height=height,
-                    width=width,
-                    num_inference_steps=sample_steps,
-                    guidance_scale=scale,
-                    enable_temporal_attentions=True,
-                    num_images_per_prompt=1,
-                    mask_feature=True,
-                ).video
-                videos = videos[0]
-        else:
-            # Create video from frames
-            videos = np.array(frames)
-    else:
-        # Generate the video using the prompt
-        with torch.no_grad():
-            videos = videogen_pipeline(
-                prompt,
-                video_length=video_length,
-                height=height,
-                width=width,
-                num_inference_steps=sample_steps,
-                guidance_scale=scale,
-                enable_temporal_attentions=True,
-                num_images_per_prompt=1,
-                mask_feature=True,
-            ).video
-            videos = videos[0]
-
-    # Save the video
+    # Generate a timestamp for the output filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    video_path = f"../output/generated_video_{timestamp}.mp4"
-    imageio.mimwrite(video_path, videos, fps=24, quality=9)  # highest quality is 10, lowest is 0
+    output_path = f"./output/generated_video_{timestamp}.mp4"
     
-    # Return to previous directory
-    os.chdir(prev_dir)
+    try:
+        # Setup the Open Sora model
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # Args configuration
+        args = type('args', (), {
+            'ae': 'CausalVAEModel_4x8x8',
+            'force_images': image_paths is not None and len(image_paths) > 0,
+            'model_path': 'LanguageBind/Open-Sora-Plan-v1.0.0',
+            'text_encoder_name': 'DeepFloyd/t5-v1_1-xxl',
+            'version': '65x512x512'
+        })
+        
+        # Set environment seed
+        seed = video_seed if video_seed > 0 else random.randint(0, 203279)
+        random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+        
+        # Load model components
+        from diffusers import PNDMScheduler
+        from transformers import T5Tokenizer, T5EncoderModel
+        
+        # Import Open Sora components (making sure they're in the path)
+        sys.path.append("./Open-Sora-Plan-v1.0.0-hf")
+        from opensora.models.ae import ae_stride_config, getae, getae_wrapper
+        from opensora.models.diffusion.latte.modeling_latte import LatteT2V
+        from opensora.sample.pipeline_videogen import VideoGenPipeline
+
+        print("Loading transformer model...")
+        transformer_model = LatteT2V.from_pretrained(args.model_path, subfolder=args.version, 
+                                                   torch_dtype=torch.float16, cache_dir='cache_dir').to(device)
+
+        print("Loading VAE model...")
+        vae = getae_wrapper(args.ae)(args.model_path, subfolder="vae", cache_dir='cache_dir').to(device, dtype=torch.float16)
+        vae.vae.enable_tiling()
+        image_size = int(args.version.split('x')[1])
+        latent_size = (image_size // ae_stride_config[args.ae][1], image_size // ae_stride_config[args.ae][2])
+        vae.latent_size = latent_size
+        transformer_model.force_images = args.force_images
+        
+        print("Loading text encoder and tokenizer...")
+        tokenizer = T5Tokenizer.from_pretrained(args.text_encoder_name, cache_dir="cache_dir")
+        text_encoder = T5EncoderModel.from_pretrained(args.text_encoder_name, cache_dir="cache_dir",
+                                                    torch_dtype=torch.float16).to(device)
+
+        # Set all models to eval mode
+        transformer_model.eval()
+        vae.eval()
+        text_encoder.eval()
+        
+        # Setup scheduler and pipeline
+        scheduler = PNDMScheduler()
+        videogen_pipeline = VideoGenPipeline(vae=vae,
+                                           text_encoder=text_encoder,
+                                           tokenizer=tokenizer,
+                                           scheduler=scheduler,
+                                           transformer=transformer_model).to(device=device)
+
+        # Generate the video
+        with torch.no_grad():
+            print(f"Generating video with prompt: {prompt}")
+            video_length = transformer_model.config.video_length if not args.force_images else 1
+            height, width = int(args.version.split('x')[1]), int(args.version.split('x')[2])
+            num_frames = 1 if video_length == 1 else int(args.version.split('x')[0])
+            
+            videos = videogen_pipeline(prompt,
+                                     video_length=video_length,
+                                     height=height,
+                                     width=width,
+                                     num_inference_steps=int(video_steps),
+                                     guidance_scale=float(video_scale),
+                                     enable_temporal_attentions=not args.force_images,
+                                     num_images_per_prompt=1,
+                                     mask_feature=True).video
+
+        # Clear CUDA cache
+        torch.cuda.empty_cache()
+        
+        # Save the video
+        videos = videos[0]
+        imageio.mimwrite(output_path, videos, fps=24, quality=9)  # highest quality is 10, lowest is 0
+        print(f"Video saved to {output_path}")
+        
+        # Display model info
+        display_model_info = f"Video size: {num_frames}×{height}×{width}, Sampling Step: {video_steps}, Guidance Scale: {video_scale}"
+        print(display_model_info)
+        
+        return output_path
     
-    print(f"\n✅ Video generation complete!")
-    print(f"📹 Video saved to {video_path}")
-    print(f"Video info: {videos.shape[0]} frames at {height}x{width}, Steps: {sample_steps}, Scale: {scale}, Seed: {seed}")
-    
-    return video_path
+    except Exception as e:
+        print(f"\n❌ Error generating video with Open Sora: {str(e)}")
+        print("Falling back to using Gemini-generated images only...")
+        
+        # If we have images but Open Sora failed, create a simple slideshow from the images
+        if image_paths and len(image_paths) > 0:
+            try:
+                print("Creating slideshow from Gemini-generated images...")
+                # Create slideshow from images (5 seconds per image)
+                images = []
+                for img_path in image_paths:
+                    if os.path.exists(img_path):
+                        img = imageio.imread(img_path)
+                        # Duplicate each image to create a 5-second clip (assuming 30fps)
+                        for _ in range(150):  # 5 seconds at 30fps
+                            images.append(img)
+                
+                # Save as video
+                if images:
+                    imageio.mimwrite(output_path, images, fps=30, quality=9)
+                    print(f"Slideshow video saved to {output_path}")
+                    return output_path
+            except Exception as e2:
+                print(f"\n❌ Error creating slideshow: {str(e2)}")
+        
+        # If all else fails, raise the original exception
+        raise e
 
 def generate_audio_with_bark(text, voice_preset="v2/en_speaker_1"):
     """Generate audio using Bark
@@ -628,18 +598,16 @@ def main():
     if use_images and len(image_files) > 0:
         video_path = generate_video_with_open_sora(
             image_paths=image_files,
-            sample_steps=args.video_steps,
-            scale=args.video_scale,
-            seed=args.video_seed,
-            randomize_seed=True
+            video_steps=args.video_steps,
+            video_scale=args.video_scale,
+            video_seed=args.video_seed,
         )
     else:
         video_path = generate_video_with_open_sora(
             prompt=args.prompt,
-            sample_steps=args.video_steps,
-            scale=args.video_scale,
-            seed=args.video_seed,
-            randomize_seed=True
+            video_steps=args.video_steps,
+            video_scale=args.video_scale,
+            video_seed=args.video_seed,
         )
     
     # Step 3: Generate audio with Bark
