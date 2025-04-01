@@ -152,7 +152,7 @@ def generate_content_with_gemini(prompt):
         types.Content(
             role="user",
             parts=[
-                types.Part.from_text(text="""{}}""".format(prompt)),
+                types.Part.from_text(text="{}".format(prompt)),
             ],
         ),
     ]
