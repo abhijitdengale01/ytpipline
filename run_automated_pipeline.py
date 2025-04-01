@@ -16,27 +16,34 @@ def setup_environment():
     output_dir.mkdir(exist_ok=True)
     output_dir.joinpath("images").mkdir(exist_ok=True)
     
-    # Check if Gemini API key is set
-    if "GEMINI_API_KEY" not in os.environ:
-        # For Colab, try to get from userdata
-        try:
-            from google.colab import userdata
-            api_key = userdata.get("GEMINI_API_KEY")
-            if api_key:
-                os.environ["GEMINI_API_KEY"] = api_key
-                print("✅ Retrieved Gemini API key from Colab userdata")
-            else:
-                raise ValueError("No API key found in userdata")
-        except:
-            # Fallback to environment variable or error
-            api_key = os.environ.get("GEMINI_API_KEY")
-            if not api_key:
-                print("\n\033[91m❌ ERROR: GEMINI_API_KEY environment variable is not set.\033[0m")
-                print("Please set your Gemini API key as an environment variable:")
-                print("  - In Linux/macOS: export GEMINI_API_KEY=your-api-key")
-                print("  - In Windows: set GEMINI_API_KEY=your-api-key")
-                print("  - In Colab: Set the userdata or environment variable")
-                sys.exit(1)
+    # Set Gemini API key from config file if available
+    try:
+        from config import GEMINI_API_KEY
+        os.environ["GEMINI_API_KEY"] = GEMINI_API_KEY
+        print("✅ Loaded Gemini API key from config.py")
+    except ImportError:
+        # Check if Gemini API key is set in environment
+        if "GEMINI_API_KEY" not in os.environ:
+            # For Colab, try to get from userdata
+            try:
+                from google.colab import userdata
+                api_key = userdata.get("GEMINI_API_KEY")
+                if api_key:
+                    os.environ["GEMINI_API_KEY"] = api_key
+                    print("✅ Retrieved Gemini API key from Colab userdata")
+                else:
+                    raise ValueError("No API key found in userdata")
+            except:
+                # Fallback to environment variable or error
+                api_key = os.environ.get("GEMINI_API_KEY")
+                if not api_key:
+                    print("\n\033[91m❌ ERROR: GEMINI_API_KEY environment variable is not set.\033[0m")
+                    print("Please set your Gemini API key as an environment variable:")
+                    print("  - In Linux/macOS: export GEMINI_API_KEY=your-api-key")
+                    print("  - In Windows: set GEMINI_API_KEY=your-api-key")
+                    print("  - In Colab: Set the userdata or environment variable")
+                    print("  - Or create a config.py file with GEMINI_API_KEY variable")
+                    sys.exit(1)
     
     # Install required packages
     print("\n\033[1m📦 Installing dependencies...\033[0m")

@@ -39,10 +39,16 @@ def setup_environment():
     output_dir.mkdir(exist_ok=True)
     output_dir.joinpath("images").mkdir(exist_ok=True)
     
-    # Check for Gemini API key
-    if "GEMINI_API_KEY" not in os.environ:
-        api_key = input("Enter your Gemini API key: ")
-        os.environ["GEMINI_API_KEY"] = api_key
+    # Set Gemini API key from config file if available
+    try:
+        from config import GEMINI_API_KEY
+        os.environ["GEMINI_API_KEY"] = GEMINI_API_KEY
+        print("✅ Loaded Gemini API key from config.py")
+    except ImportError:
+        # Check for Gemini API key in environment
+        if "GEMINI_API_KEY" not in os.environ:
+            api_key = input("Enter your Gemini API key: ")
+            os.environ["GEMINI_API_KEY"] = api_key
     
     # Check if Open Sora repo exists, if not clone it
     if not Path("./Open-Sora-Plan-v1.0.0-hf").exists():
